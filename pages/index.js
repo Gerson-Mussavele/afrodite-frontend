@@ -70,6 +70,13 @@ const LoginPage = () => {
         </div>
         <button type="button" className="btn btn-primary" onClick={handleLogin}>Login</button>
       </form>
+      <style jsx global>{`
+        body {
+          background: url('/img/LOGO.jpg') no-repeat center center fixed; /* Substitua 'cerveja.jpg' pelo nome da sua imagem */
+          background-size: cover;
+          overflow: hidden;
+        }
+      `}</style>
     </div>
   );
 };

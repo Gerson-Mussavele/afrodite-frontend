@@ -1,19 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Container, ListGroup, Form, Button } from 'react-bootstrap';
+import { Container, ListGroup, Form, Button, Badge, Row, Col } from 'react-bootstrap';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import TopNavbar from './TopNavBar';
 import { useAuth } from './authContext';
 
-const Sales = () => {
-  const [sales, setSales] = useState([]);
+const Orders = () => {
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const {fetchUserStatus}= useAuth();
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [filteredOrders, setFilteredOrders] = useState([]);
+  const [totalForSelectedDay, setTotalForSelectedDay] = useState(0);
+  const { fetchUserStatus } = useAuth();
 
-  useEffect(() =>{
+  useEffect(() => {
     const fetchData = async () => {
       if (fetchUserStatus) {
         await fetchUserStatus();
@@ -21,65 +24,77 @@ const Sales = () => {
     };
 
     fetchData();
-  },[fetchUserStatus]);
+  }, [fetchUserStatus]);
 
   useEffect(() => {
-    const fetchSales = async () => {
+    const fetchOrders = async () => {
       try {
-
-        if (!user && !loading) {
-          console.log('Usuário não autenticado. Redirecionando para a página de login.');
-          router.push('/');
-          return;
-        }
-
-        const response = await fetch('http://localhost:8000/api/sales/');
+        const response = await fetch('http://localhost:8000/api/orders/');
         if (!response.ok) {
           throw new Error(`Erro na solicitação: ${response.status}`);
         }
-        
-        const data = await response.json();
-        console.log(data);
-        console.log('Dados recebidos do servidor:', data);
-
-        
-        if (data && data.hasOwnProperty('sales') && Array.isArray(data.sales)) {
-          
-          const completedSales = data.sales.filter(sale => sale.finished);
-          setSales(completedSales);
+    
+        const ordersData = await response.json();
+    
+        console.log('Dados recebidos do servidor:', ordersData);
+    
+        if (Array.isArray(ordersData)) {
+          setOrders(ordersData);
+          setLoading(false);
         } else {
-          console.error('Dados inválidos recebidos do servidor.');
-          console.log('Dados recebidos do servidor:', data);
+          console.error('Estrutura de dados inválida. Esperava-se um array de objetos.');
+          console.log('Dados recebidos do servidor:', ordersData);
         }
       } catch (error) {
-        console.error('Erro ao buscar vendas:', error);
-      } finally {
+        console.error('Erro ao buscar pedidos:', error);
         setLoading(false);
       }
     };
 
-    // Chamada à função de fetchSales no carregamento inicial
-    fetchSales();
+    fetchOrders();
   }, []);
 
-  // Lógica para paginação
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentSales = sales.slice(indexOfFirstItem, indexOfLastItem);
+  useEffect(() => {
+    const completedOrders = orders.filter(order => order.finished);
+    setFilteredOrders(completedOrders);
+  }, [orders]);
 
-  // Lógica para filtrar por data
-  const filteredSales = sales.filter(sale => {
-    if (!startDate && !endDate) return true;
-
-    const saleTime = new Date(sale.sale_time);
-    const start = startDate ? new Date(startDate) : null;
-    const end = endDate ? new Date(endDate) : null;
-
-    return (!start || saleTime >= start) && (!end || saleTime <= end);
-  });
+  useEffect(() => {
+    const total = filteredOrders.reduce((acc, order) => acc + parseFloat(order.total_amount), 0);
+    setTotalForSelectedDay(total);
+  }, [filteredOrders]);
 
   const handlePageChange = (pageNumber) => {
     setCurrentPage(pageNumber);
+  };
+
+  const handleApplyFilter = () => {
+    const filtered = orders.filter(order => {
+      const orderTime = new Date(order.created_at);
+      const selectedDateTime = selectedDate ? selectedDate.getTime() : null;
+
+      return selectedDateTime &&
+        orderTime.setHours(0, 0, 0, 0) === selectedDateTime;
+    });
+
+    setFilteredOrders(filtered);
+    setCurrentPage(1);
+  };
+
+  const renderPageNumbers = () => {
+    const pageNumbers = [];
+    for (let i = 1; i <= Math.ceil(filteredOrders.length / itemsPerPage); i++) {
+      pageNumbers.push(
+        <Button
+          key={i}
+          variant={i === currentPage ? 'primary' : 'outline-primary'}
+          onClick={() => handlePageChange(i)}
+        >
+          {i}
+        </Button>
+      );
+    }
+    return pageNumbers;
   };
 
   return (
@@ -90,45 +105,49 @@ const Sales = () => {
 
         {/* Filtro por data */}
         <Form>
-          <Form.Group className="mb-3">
-            <Form.Label>Data de Início:</Form.Label>
-            <Form.Control
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3">
-            <Form.Label>Data de Fim:</Form.Label>
-            <Form.Control
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
-          </Form.Group>
-
-          <Button variant="primary" onClick={() => setCurrentPage(1)}>
-            Aplicar Filtro
-          </Button>
+          <Row className="mb-3">
+            <Col xs={12} md={6}>
+              <Form.Label>Escolha uma Data:</Form.Label>
+              <DatePicker
+                selected={selectedDate}
+                onChange={(date) => setSelectedDate(date)}
+                dateFormat="dd/MM/yyyy"
+              />
+            </Col>
+            <Col xs={12} md={6} className="align-self-end">
+              <Button variant="primary" onClick={handleApplyFilter}>
+                Aplicar Filtro
+              </Button>
+            </Col>
+          </Row>
         </Form>
+
+        {/* Total de vendas para o dia selecionado */}
+        {selectedDate && (
+          <Badge className="mt-2" bg="success">
+            Total para o Dia: MZN {totalForSelectedDay.toFixed(2)}
+          </Badge>
+        )}
       </div>
 
       {loading ? (
-        <p>Carregando vendas...</p>
+        <p>Carregando pedidos...</p>
       ) : (
         <div>
           <ListGroup>
-            {filteredSales.length > 0 ? (
-              currentSales.map((sale) => (
-                <ListGroup.Item key={sale.id}>
-                  {/* Renderizar detalhes da venda */}
-                  <h5>ID da Venda: {sale.id}</h5>
-                  <p>Data da Venda: {sale.sale_time}</p>
-                  <p>Total: MZN {sale.total_amount.toFixed(2)}</p>
-                  {/* Outras informações relevantes sobre a venda */}
-                </ListGroup.Item>
-              ))
+            {filteredOrders.length > 0 ? (
+              filteredOrders
+                .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                .map((order) => (
+                  <ListGroup.Item key={order.id}>
+                    {/* Renderizar detalhes do pedido */}
+                    <h5>ID do Pedido: {order.id}</h5>
+                    <p>Data do Pedido: {order.created_at}</p>
+                    <p>Total: MZN {parseFloat(order.total_amount).toFixed(2)}</p>
+
+                    {/* Outras informações relevantes sobre o pedido */}
+                  </ListGroup.Item>
+                ))
             ) : (
               <p>Nenhuma venda encontrada.</p>
             )}
@@ -136,7 +155,27 @@ const Sales = () => {
 
           {/* Paginação */}
           <div className="mt-3">
-            {/* A lógica de paginação deve ser implementada aqui */}
+            {filteredOrders.length > itemsPerPage && (
+              <div className="d-flex justify-content-center">
+                <Button
+                  variant="outline-primary"
+                  disabled={currentPage === 1}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                >
+                  Anterior
+                </Button>
+
+                {renderPageNumbers()}
+
+                <Button
+                  variant="outline-primary"
+                  disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)}
+                  onClick={() => handlePageChange(currentPage + 1)}
+                >
+                  Próximo
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -144,4 +183,4 @@ const Sales = () => {
   );
 };
 
-export default Sales;
+export default Orders;

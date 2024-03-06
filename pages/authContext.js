@@ -1,4 +1,5 @@
 // AuthContext.js
+import React from 'react';
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 
@@ -55,7 +56,6 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
   };
-
   const setAuthUser = (user) =>{
     setUser(user)
   }
@@ -72,6 +72,9 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
+
+export default AuthProvider;
+
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

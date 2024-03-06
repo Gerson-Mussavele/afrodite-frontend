@@ -1,151 +1,125 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Modal, Form } from 'react-bootstrap';
+import { Button, Modal, ListGroup } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import { useRouter } from 'next/router';
-import {useAuth} from "./authContext";
-import axios from "axios"
+import axios from "axios";
+import ReceiptModal from "./ReceiptModal";
+import CreateOrder from "./createOrder";
 
 const OrderDetail = ({ order, onClose, onFinishOrder }) => {
   const router = useRouter();
-  const { user, loading, logout, fetchUserStatus } = useAuth();
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('');
-  const [isLoadingPayment, setIsLoadingPayment] = useState(false);
-  const [paymentCompleted, setPaymentCompleted] = useState(false);
-  console.log('fetchUserStatus:', fetchUserStatus);
-  //console.log('fetchUserStatus:', fetchUserStatus);
-
-  useEffect(() =>{
-    const fetchData = async () => {
-      if (fetchUserStatus) {
-        await fetchUserStatus();
-      }
-    };
-
-    fetchData();
-  },[fetchUserStatus]);
+  const [loadingFetchDetails, setLoadingFetchDetails] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [receiptData, setReceiptData] = useState(null); // Estado para armazenar os dados do recibo
 
   useEffect(() => {
-    const checkAuthentication = async () => {
-      if (loading) {
-        console.log('Aguardando autenticação...');
-        return;
+    if (router.query) {
+      if (!order && !loadingFetchDetails && router.query.id) {
+        getOrderDetails();
       }
-      console.log(user)
-      if (!user || !user.authenticated) {
-        console.log("yooo")
-        console.log('Usuário não autenticado. Redirecionando para a página de login.');
-         router.push('/');
-      }
-    };
+    }
+  }, [order, loadingFetchDetails, router]);
 
-    checkAuthentication();
-  }, [user, loading, router]);
+  async function getOrderDetails() {
+    try {
+      setLoadingFetchDetails(true);
+      const res = await axios.get(`http://localhost:8000/api/orders/${router.query.id}/`);
+      setOrder(res.data);
+      setLoadingFetchDetails(false);
+    } catch (e) {
+      setLoadingFetchDetails(false);
+      console.error("Error fetching order details: ", e);
+    }
+  }
 
-  const handleEdit = () => {
-    router.push({
-      pathname: '/createOrder',
-      query: { orderId: order.id, editMode: true, orderDetails: JSON.stringify(order) },
-    });
-  };
-
-  const handlePrintReceipt = () => {
-    setShowReceipt(true);
-    window.print();
-    setShowReceipt(false);
-  };
-
-  const handlePaymentMethod = (method) => {
-    setPaymentMethod(method);
-    setShowPaymentModal(true);
+  const handlePrintReceipt = async () => {
+    setShowReceipt(true); // Ao clicar em "Recibo", exibe o modal de recibo
   };
 
   const handleFinishOrder = async () => {
     try {
-      setIsLoadingPayment(true);
-      // console.log('URL da solicitação PATCH:', `http://localhost:8000/orders/${order.id}`);
-      const body = {
-          finished: true,
+      if (!order || !order.id || !paymentMethod) {
+        throw new Error('Pedido ou método de pagamento inválido');
       }
-      const response = await axios.patch(`http://localhost:8000/api/orders/finish/${order.id}/`, body);
 
-      console.log('Finish Order Response:', response);
+      const response = await axios.patch(`http://localhost:8000/api/orders/${order.id}/`, { 
+        finished: true,
+        payment_method: paymentMethod 
+      });
 
-      if (response.status != 200) {
+      if (response.status !== 200) {
         throw new Error(`Erro ao finalizar o pedido: ${response.statusText}`);
       }
-
-      setPaymentMethod('');
-      setPaymentCompleted(true);
 
       onFinishOrder(order);
       onClose();
     } catch (error) {
       console.error(`Erro ao finalizar o pedido: ${error.message}`);
-    } finally {
-      setIsLoadingPayment(false);
     }
   };
 
+  const handleEditOrder = () => {
+    // Navegar para a página CreateOrder em modo de edição
+    router.push({
+      pathname: '/createOrder',
+      query: { edit: true, orderId: order.id, orderDetails: JSON.stringify(order) }
+    });
+  };
+
+  const paymentOptions = [
+    { name: "M-pesa", image: "/img/Mpesa.png" },
+    { name: "E-mola", image: "/img/emola.png" },
+    { name: "POS", image: "/img/POS.png" },
+    { name: "Cash", image: "/img/cash.jpg" }
+  ];
+
   return (
-    <Modal show={true} onHide={onClose}>
-      <Modal.Header closeButton>
-        <Modal.Title>Detalhes do Pedido - Mesa {order.table}</Modal.Title>
-      </Modal.Header>
-      <Modal.Body>
-        <Button variant="info" onClick={handleEdit}>
-          Editar Pedido
-        </Button>
-
-        <Button variant="primary" onClick={() => setShowPaymentModal(true)}>
-          Pagar
-        </Button>
-
-        <Button variant="success" onClick={handlePrintReceipt}>
-          Recibo
-        </Button>
-      </Modal.Body>
-      <Modal.Footer>
-        <Button variant="secondary" onClick={onClose}>
-          Fechar
-        </Button>
-      </Modal.Footer>
-
-      <Modal show={showPaymentModal} onHide={() => setShowPaymentModal(false)}>
+    <>
+      <Modal show={true} onHide={onClose}>
         <Modal.Header closeButton>
-          <Modal.Title>Escolha o Método de Pagamento</Modal.Title>
+          <Modal.Title>Detalhes do Pedido - Mesa {order.table}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <Form>
-            <Form.Check
-              type="radio"
-              label="POS"
-              name="paymentMethod"
-              checked={paymentMethod === 'POS'}
-              onChange={() => setPaymentMethod('POS')}
-            />
-            <Form.Check
-              type="radio"
-              label="CASH"
-              name="paymentMethod"
-              checked={paymentMethod === 'CASH'}
-              onChange={() => setPaymentMethod('CASH')}
-            />
-          </Form>
+          <ListGroup horizontal>
+            {paymentOptions.map(option => (
+              <ListGroup.Item 
+                key={option.name} 
+                action 
+                active={paymentMethod === option.name}
+                onClick={() => setPaymentMethod(option.name)}
+              >
+                <img src={option.image} alt={option.name} width="30" height="30" style={{ marginRight: '10px' }} />
+                {option.name}
+              </ListGroup.Item>
+            ))}
+          </ListGroup>
+          <Button variant="success" onClick={handlePrintReceipt}>
+            Recibo
+          </Button>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="success" onClick={handleFinishOrder} disabled={isLoadingPayment}>
-            {isLoadingPayment ? 'Processando...' : 'Finalizar Pedido'}
+          <Button variant="secondary" onClick={() => { router.back() }}>
+            Fechar
+          </Button>
+          <Button variant="warning" onClick={handleEditOrder}>
+            Editar Pedido
+          </Button>
+          <Button variant="success" onClick={handleFinishOrder}>
+            Finalizar Pedido
           </Button>
         </Modal.Footer>
       </Modal>
-
-      {/* Modal de Recibo */}
-      <Modal show={showReceipt && paymentCompleted} onHide={() => setShowReceipt(false)}>
-        {/* ... código do modal de recibo ... */}
-      </Modal>
-    </Modal>
+      
+      {/* Renderiza o modal de recibo se showReceipt for true */}
+      {showReceipt && (
+        <ReceiptModal 
+          show={showReceipt} 
+          receiptData={receiptData} 
+          onClose={() => setShowReceipt(false)} 
+        />
+      )}
+    </>
   );
 };
 

@@ -15,7 +15,7 @@ const Stock = () => {
   const [searchTerm, setSearchTerm] = useState(''); // Adicionado estado para o termo de pesquisa
   const router = useRouter();
   const { user, loading , logout, fetchUserStatus } = useAuth();
-  console.log('fetchUserStatus:', fetchUserStatus);
+
   useEffect(() =>{
     const fetchData = async () => {
       if (fetchUserStatus) {
@@ -38,7 +38,7 @@ const Stock = () => {
         return;
       }
 
-      const response = await fetch(`http://localhost:8000/api/products/?search=${searchTerm}&page=${currentPage}`, {
+      const response = await fetch(`http:localhost:8000/api/products/?search=${searchTerm}&page=${currentPage}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${user?.access || ''}`,
@@ -68,15 +68,24 @@ const Stock = () => {
     fetchProducts();
   }, [fetchProducts]);
 
-
   const handleEditQuantity = async (productId, newQuantity) => {
     try {
+      // Atualiza a quantidade no estado local (no cliente)
+      setProducts((prevProducts) =>
+        prevProducts.map((prevProduct) =>
+          prevProduct.id === productId
+            ? { ...prevProduct, available_quantity: newQuantity }
+            : prevProduct
+        )
+      );
+
+      // Envia a requisição PATCH para atualizar a quantidade no servidor
       const response = await fetch(`http://localhost:8000/api/products/${productId}/`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ quantity: newQuantity }),
+        body: JSON.stringify({ available_quantity: newQuantity }),
       });
 
       if (!response.ok) {
@@ -89,7 +98,7 @@ const Stock = () => {
 
   const handleNavigateToCreateProduct = (productId) => {
     if (productId !== undefined) {
-      router.push(`/CreateProduct?id=${productId}`);
+      router.push(`/CreateProduct${productId ? `?id=${productId}` : ''}`);
     } else {
       router.push('/CreateProduct');
     }
@@ -111,8 +120,6 @@ const Stock = () => {
       console.error('Erro ao excluir o produto:', error);
     }
   };
-
-  console.log('Products:', products);
 
   return (
     <div>

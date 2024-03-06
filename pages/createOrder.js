@@ -1,24 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Form, Button, Col, Row, ListGroup, Alert } from 'react-bootstrap';
+import { Container, Form, Button, Col, Row, ListGroup, Alert, Spinner } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import TopNavbar from './TopNavBar';
 import { useRouter } from 'next/router';
 import axios from 'axios';
 import { useAuth } from './authContext';
-import debounce from 'lodash.debounce';  // Importe a biblioteca debounce
+import debounce from 'lodash.debounce';
 
-const CreateOrder = () => {
+const CreateOrder = ({ edit = false, order }) => {
   const router = useRouter();
-  const { user, loading: isLoading, logout, fetchUserStatus } = useAuth();
+  const { user, fetchUserStatus } = useAuth();
 
   const [tableNumber, setTableNumber] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [products, setProducts] = useState([]);
   const [selectedProducts, setSelectedProducts] = useState([]);
-  const [editMode, setEditMode] = useState(false);
+  const [editMode, setEditMode] = useState(edit);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
+  const [editOrderDetails, setEditOrderDetails] = useState(null);
+  const [totalAmount, setTotalAmount] = useState(0);
+
+  const [orderId, setOrderId] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -31,35 +36,31 @@ const CreateOrder = () => {
   }, [fetchUserStatus]);
 
   useEffect(() => {
-    const checkAuthentication = async () => {
-      if (loading) {
-        console.log('Aguardando autenticação...');
-        return;
-      }
-      console.log(user)
-      if (!user || !user.authenticated) {
-        console.log('Usuário não autenticado. Redirecionando para a página de login.');
-        router.push('/');
-      }
-    };
-
-    checkAuthentication();
-  }, [user, loading, router]);
-
-  useEffect(() => {
-    const { editMode: editQueryParam, orderDetails } = router.query;
-    if (editQueryParam && orderDetails) {
+    const { edit: editQueryParam, orderId, orderDetails } = router.query;
+  
+    if (editQueryParam && orderId && orderDetails) {
       const order = JSON.parse(orderDetails);
       setTableNumber(order.table_number);
-
-      const updatedSelectedProducts = order.items.map((item) => ({
-        ...item.product,
-        quantity: item.quantity,
-        total: item.quantity * item.product.price.toFixed(2),
-      }));
-
-      setSelectedProducts(updatedSelectedProducts);
       setEditMode(true);
+
+      setOrderId(orderId)
+  
+      // const updatedSelectedProducts = order.items.map((item) => ({
+      //   ...item.product,
+      //   quantity: item.quantity,
+      //   total: item.total,
+      // }));
+  
+      // setSelectedProducts(updatedSelectedProducts);
+  
+      // const totalAmount = updatedSelectedProducts.reduce((total, product) => total + parseFloat(product.total), 0).toFixed(2);
+      // setTotalAmount(totalAmount);
+  
+      //setEditOrderDetails(order);
+    } else {
+      setTableNumber('');
+      setSelectedProducts([]);
+      setEditOrderDetails(null);
     }
   }, [router.query]);
 
@@ -76,31 +77,56 @@ const CreateOrder = () => {
       } finally {
         setLoading(false);
       }
-    }, 300);  // Tempo de debounce ajustado para 300 milissegundos
+    }, 300);
+
+    const fetchOrderDetails = debounce(async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response = await axios.get(`http://localhost:8000/api/orders/${orderId}/`);
+        console.log("testing")
+        console.log(response.data)
+        setEditOrderDetails(response.data);
+
+        const updatedSelectedProducts = editOrderDetails.items.map((item) => ({
+          id: item.id,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          total: item.subtotal,
+        }));
+
+        const totalAmount = updatedSelectedProducts.reduce((total, product) => total + parseFloat(product.total), 0).toFixed(2);
+        setTotalAmount(totalAmount);
+    
+        setSelectedProducts(updatedSelectedProducts);
+      } catch (error) {
+        handleApiError(error);
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
 
     fetchProducts();
-  }, [searchTerm]);
 
-  const calculateTotalAmount = () => {
-    return selectedProducts.reduce((total, product) => total + parseFloat(product.total), 0).toFixed(2);
-  };
+    if(editMode) fetchOrderDetails()
+  }, [searchTerm, editMode]);
 
   const handleAddToOrder = (product) => {
-    const existingProduct = selectedProducts.find((p) => p.id === product.id);
-
-    if (existingProduct) {
-      existingProduct.quantity += 1;
-      existingProduct.total = (existingProduct.quantity * parseFloat(existingProduct.price)).toFixed(2);
-      setSelectedProducts([...selectedProducts]);
+    const existingProductIndex = selectedProducts.findIndex((p) => p.id === product.id);
+  
+    if (existingProductIndex !== -1) {
+      const updatedProducts = [...selectedProducts];
+      updatedProducts[existingProductIndex].quantity += 1;
+      updatedProducts[existingProductIndex].total = (updatedProducts[existingProductIndex].quantity * parseFloat(updatedProducts[existingProductIndex].price)).toFixed(2);
+      setSelectedProducts(updatedProducts);
     } else {
-      setSelectedProducts((prevProducts) => [
-        ...prevProducts,
-        {
-          ...product,
-          quantity: 1,
-          total: (parseFloat(product.price) * 1).toFixed(2),
-        },
-      ]);
+      const newProduct = {
+        ...product,
+        quantity: 1,
+        total: (parseFloat(product.price) * 1).toFixed(2),
+      };
+      setSelectedProducts([...selectedProducts, newProduct]);
     }
   };
 
@@ -109,10 +135,10 @@ const CreateOrder = () => {
       prevProducts.map((product) =>
         product.id === productId
           ? {
-            ...product,
-            quantity: newQuantity,
-            total: (newQuantity * product.price).toFixed(2),
-          }
+              ...product,
+              quantity: newQuantity,
+              total: (newQuantity * parseFloat(product.price)).toFixed(2),
+            }
           : product
       )
     );
@@ -130,36 +156,64 @@ const CreateOrder = () => {
     }
   };
 
-  const updateOrder = async (newOrder) => {
+  const updateOrder = async (orderId, updatedOrder) => {
     try {
-      const { orderId } = router.query;
-      await axios.put(`http://localhost:8000/api/orders/${orderId}/`, newOrder);
+      setSubmitting(true);
+      console.log('Dados do pedido atualizado:', updatedOrder);
+      const response = await axios.patch(`http://localhost:8000/api/orders/${orderId}/`, updatedOrder, {
+        headers: {
+          Authorization: `Bearer ${user?.access || ''}`,
+        },
+        credentials: 'include',
+      });
 
-      setEditMode(false);
-      handleSuccess('Pedido atualizado com sucesso!');
-    } catch (e) {
-      throw Error(`Update Order Error: ${e.message}`)
+      if (response.status === 200) {
+        console.log('Pedido atualizado com sucesso!');
+        const updatedSelectedProducts = updatedOrder.items.map((item) => ({
+          ...item.product,
+          quantity: item.quantity,
+          total: item.total,
+        }));
+        setSelectedProducts(updatedSelectedProducts);
+
+        const totalAmount = updatedSelectedProducts.reduce((total, product) => total + parseFloat(product.total), 0).toFixed(2);
+        setTotalAmount(totalAmount);
+      } else {
+        console.error(`Erro ao atualizar o pedido (ID ${orderId}): ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error(`Erro ao atualizar o pedido (ID ${orderId}):`, error.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const createOrder = async (newOrder) => {
-    console.log('Dados do pedido:', newOrder)
     try {
-      //console.log(newOrder);
-      const response = await axios.post('http://localhost:8000/api/orders/', newOrder);
+      setSubmitting(true);
+      const response = await axios.post('http://localhost:8000/api/orders/', newOrder, {
+        headers: {
+          Authorization: `Bearer ${user?.access || ''}`,
+        },
+        credentials: 'include',
+      });
 
-      if (response.status >= 200 && response.status < 300) {
-        //setSelectedProducts([]);
-        setSuccessMessage('Pedido criado com sucesso!');
-
+      if (response.status === 201) {
+        router.push('/Order');
+        console.log('Pedido criado com sucesso:', response.data);
       } else {
-        console.error('Erro ao criar pedido:', response.status, response.statusText, response.data);
-        throw new Error(`Erro ao criar pedido: ${response.status} - ${response.statusText}`)
+        console.error('Falha ao criar pedido:', response.statusText, response.data);
+
+        if (response.status === 400) {
+          console.error('Pedido inválido:', response.data);
+          throw new Error(`Pedido inválido: ${JSON.stringify(response.data)}`);
+        }
       }
-    } catch (e) {
-      console.error('Erro na criação do pedido:', error);
-      //console.log('Detalhes da resposta HTTP:', error.response);
-      throw Error;
+    } catch (error) {
+      console.error('Erro na criação do pedido:', error.message);
+      handleError(error);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -172,29 +226,43 @@ const CreateOrder = () => {
   const handleCreateOrder = async () => {
     try {
       validateOrderData();
-
+  
+      // Calcular os subtotais dos itens do pedido
+      const updatedSelectedProducts = selectedProducts.map((product) => ({
+        ...product,
+        total: (product.quantity * parseFloat(product.price)).toFixed(2),
+      }));
+  
       const newOrder = {
         table_number: Number.parseInt(tableNumber),
-        total_amount: Number.parseFloat(calculateTotalAmount()),
-        items: selectedProducts.map(({ quantity, total, ...rest }) => ({
+        total_amount: Number.parseFloat(totalAmount),
+        items: updatedSelectedProducts.map(({ quantity, total, ...product }) => ({
           quantity,
           total,
-          product: rest,
+          product: product.id,
+          subtotal: (quantity * parseFloat(product.price)).toFixed(2),
+          order: 1,
         })),
       };
-
+  
       if (editMode) {
-        await updateOrder(newOrder);
+        const { orderId } = router.query;
+        if (orderId) {
+          await updateOrder(orderId, newOrder);
+        } else {
+          throw new Error("Modo de edição ativado, mas orderId não encontrado na query.");
+        }
       } else {
         await createOrder(newOrder);
       }
-
+  
       resetForm();
       router.push('/Order');
     } catch (error) {
       handleError(error);
     }
   };
+  
 
   const handleSuccess = (message) => {
     setSuccessMessage(message);
@@ -230,6 +298,9 @@ const CreateOrder = () => {
       <h1>{editMode ? 'Editar Pedido' : 'Criar Novo Pedido'}</h1>
 
       {successMessage && <Alert variant="success">{successMessage}</Alert>}
+      {error && <Alert variant="danger">{error.message}</Alert>}
+      {loading && <Spinner animation="border" role="status"><span className="sr-only">Loading...</span></Spinner>}
+      {submitting && <Spinner animation="border" role="status"><span className="sr-only">Submitting...</span></Spinner>}
 
       <Form>
         <Row>
@@ -245,21 +316,15 @@ const CreateOrder = () => {
             </Form.Group>
           </Col>
           <Col>
-            <Form.Group controlId="searchTerm">
-              <Form.Label>Pesquisar Produto:</Form.Label>
-              <Form.Control
-                type="text"
-                placeholder="Digite o nome do produto"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </Form.Group>
+            {/* Substituindo a aba de pesquisa por um botão dropdown para categorias */}
+            {/* ... (código para a dropdown) */}
           </Col>
         </Row>
       </Form>
 
       <Row>
         <Col md={8}>
+          {/* Produtos Disponíveis */}
           <h3>Produtos Disponíveis</h3>
           {loading ? (
             <p>Carregando produtos...</p>
@@ -267,34 +332,45 @@ const CreateOrder = () => {
             <p>Erro ao carregar produtos: {error.detail}</p>
           ) : (
             <ListGroup>
-              {products && products.map((product) => (
-                <ListGroup.Item key={product.id}>
-                  <div className="d-flex justify-content-between align-items-center">
-                    <span>
-                      {product.name} - {product.price}
-                    </span>
-                    <Button
-                      variant="primary"
-                      onClick={() => handleAddToOrder(product)}
-                    >
-                      Adicionar ao Pedido
-                    </Button>
-                  </div>
-                </ListGroup.Item>
-              ))}
+              {products &&
+                products.map((product) => (
+                  <ListGroup.Item key={product.id}>
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span>
+                        {product.name} - {product.price}
+                      </span>
+                      <Button
+                        variant="primary"
+                        onClick={() => handleAddToOrder(product)}
+                      >
+                        Adicionar ao Pedido
+                      </Button>
+                    </div>
+                  </ListGroup.Item>
+                ))}
             </ListGroup>
           )}
         </Col>
 
         <Col md={4}>
-          <h3>Itens no Pedido</h3>
+          {/* Itens no Pedido */}
+          <h3>Items no Pedido</h3>
           <ListGroup>
-            {selectedProducts.map((selectedProduct) => (
-              <ListGroup.Item key={selectedProduct.id}>
+            {/* {editMode && editOrderDetails && editOrderDetails.items.map((item) => (
+              <ListGroup.Item key={item.id}>
                 <div className="d-flex justify-content-between align-items-center">
                   <span>
-                    {selectedProduct.name} - {selectedProduct.quantity} x{' '}
-                    {selectedProduct.price} = {selectedProduct.total}
+                    {item.product_name} - {item.quantity} x {item.product_price} = {item.subtotal}
+                  </span>
+                </div>
+              </ListGroup.Item>
+            ))} */}
+            {/* Listar os produtos selecionados no pedido */}
+            {selectedProducts.map((selectedProduct, index) => (
+              <ListGroup.Item key={index}>
+                <div className="d-flex justify-content-between align-items-center">
+                  <span>
+                    {selectedProduct.product_name} - {selectedProduct.quantity} = {selectedProduct.total}
                   </span>
                   <div>
                     <Button
@@ -332,20 +408,23 @@ const CreateOrder = () => {
               </ListGroup.Item>
             ))}
           </ListGroup>
+
+          {/* Botões de Ação abaixo dos Itens no Pedido */}
+          <div className="mt-3">
+            <Button variant="primary" onClick={handleCreateOrder}>
+              {editMode ? 'Atualizar Pedido' : 'Adicionar Pedido'}
+            </Button>
+            <Button variant="secondary" onClick={() => router.push('/Order')} className="ms-2">
+              Voltar aos Pedidos
+            </Button>
+            {editMode && (
+              <Button variant="warning" onClick={() => setEditMode(false)} className="ms-2">
+                Cancelar Edição
+              </Button>
+            )}
+          </div>
         </Col>
       </Row>
-
-      <Button variant="primary" onClick={handleCreateOrder}>
-        {editMode ? 'Atualizar Pedido' : 'Adicionar Pedido'}
-      </Button>
-      <Button variant="secondary" onClick={() => router.push('/Order')}>
-        Voltar aos Pedidos
-      </Button>
-      {editMode && (
-        <Button variant="warning" onClick={() => setEditMode(false)}>
-          Cancelar Edição
-        </Button>
-      )}
     </Container>
   );
 };
